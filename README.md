@@ -6,25 +6,33 @@ sure to leak the minimum amount of information of each participant as possible.
 Copyright (C) 2017 Angelo Falchetti.
 All rights reserved.
 
+## Dependencies
+This project depends on PyCrypto and secret-sharing. You may install both of them by running
+
+```
+sudo -H pip3 install pycrypto secretsharing
+```
+
 ## Usage
-There are two main scripts: the server and the client scripts. Also, the `configuration.json` file contains
+There are two main scripts: the server and the client scripts. Also, the `config.json` file contains
 general configurations about the scheduling process.
 
 Every time a client wants to participate in schedule vote, the client script should be called with appropriate arguments,
 
 ```
-python3 client.py votername schedule 
+python3 client.py vote votername schedule 
 ```
+
 where the schedule is binary data (one bit per timeslot) encoded as a string of '1' and '0' characters.
 
-This script will calculate any encryption required to protect the voter's secret (for now, no encryption is applied),
-generate an update ticket (which can be used to update the vote later) and output the appropriate communication to
-be sent the server.
+This script will calculate any encryption required to protect the voter's secret (based on Shamir's secret sharing
+scheme), generate an update ticket (which can be used to update the vote later) and output the appropriate
+communication to be sent the server.
 
 Then, the server script must be called with the appropriate arguments,
 
 ```
-python3 server.py votername schedule ticket
+python3 server.py vote votername schedule
 ```
 
 A third bash script, `vote.sh` (which takes the same arguments as `client.py`) pipes both processor and outputs

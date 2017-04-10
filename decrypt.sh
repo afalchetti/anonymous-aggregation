@@ -26,11 +26,10 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 votername=$1
-schedule=$2
 
 ./sync.sh $votername
 
-message=$(python3 client.py vote $votername $schedule)
+message=$(python3 client.py decrypt $votername)
 
 while read -r line
 do

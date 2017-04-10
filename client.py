@@ -29,64 +29,191 @@ import sys
 import os
 import random
 import json
-import binascii
+import base64
+import Crypto
+from Crypto.PublicKey import RSA
+from secretsharing import secret_int_to_points, get_large_enough_prime
 
-def process(votername, schedule, config):
-	"""Compute and print an appropriate message for the server from the user details."""
+def vote(votername, schedule, config):
+	"""Compute and print the server vote message."""
 	
-	userdir     = os.path.join("client", "private", votername)
-	ticketfname = os.path.join(userdir, "ticket")
+	keysfname = os.path.join(config["userdir"], "keys")
 	
-	os.makedirs(userdir, exist_ok=True)
-	
-	# ticket format: random 32 bits prefix + last schedule (to be able to validate diff)
 	try:
-		with open(ticketfname, "r") as ticketfile:
-			ticket = json.loads(ticketfile.read())
+		with open(keysfname, "r") as keysfile:
+			counterkeys = json.loads(keysfile.read())
+	except FileNotFoundError:
+		print("Didn't found any registered vote counters.", file=sys.stderr)
+		return
+	
+	ncounters = len(counterkeys)
+	
+	if ncounters < 2:
+		print("Not enough counters.")
+		return
+	
+	shares = []
+	for i in range(config["schedulesize"]):
+		points = secret_int_to_points(ord(schedule[i]) - ord('0'),
+		                              ncounters, ncounters, config["megaprime"])
+		shares.append([str(point[0]) + "-" + str(point[1]) for point in points])
+	
+	# transpose, remove secretsharing prefixes, serialize to string and encrypt
+	sharegroups = []
+	for i, counter in enumerate(counterkeys):
+		name, key  = counter
+		pubkey     = RSA.importKey(base64.b64decode(key))
+		sharegroup = ",".join([shares[k][i] for k in range(config["schedulesize"])])
+		encrypted  = pubkey.encrypt(sharegroup.encode("utf8"), 32)[0]
+		sharegroups.append(name + ">" + base64.b64encode(encrypted).decode("utf8"))
 		
-		newticket = ticket.split("-")[0] + "-" + schedule
+		print(sharegroup, file=sys.stderr)
+	
+	print("vote")
+	print(votername)
+	print(";".join(sharegroups))
+
+# NOTE Re-registering in the middle
+#      of a vote, will kill the process because
+#      the old private key will be lost!
+def register(votername, config):
+	"""Register as a vote counter."""
+	
+	keypair          = RSA.generate(2048, os.urandom)
+	privatekey       = keypair.exportKey(format="DER")
+	publickey        = keypair.publickey().exportKey(format="DER")
+	
+	pubkeyfname  = os.path.join(config["userdir"], "publickey")
+	privkeyfname = os.path.join(config["userdir"], "privatekey")
+	
+	with open(pubkeyfname, "wb") as pubfile:
+		pubfile.write(publickey)
+	
+	with open(privkeyfname, "wb") as privfile:
+		privfile.write(privatekey)
+	
+	print("register")
+	print(votername)
+	print(base64.b64encode(publickey).decode("utf8"))
+
+def decrypt(votername, config):
+	"""Send secret share for aggregate decoding."""
+	
+	messagefname = os.path.join(config["userdir"], "messages")
+	
+	try:
+		with open(messagefname, "r") as messagefile:
+			messages = json.loads(messagefile.read())
 		
 	except FileNotFoundError:
-		newticket  = binascii.b2a_base64(os.urandom(32)).decode().strip('\n=')
-		newticket += "-" + schedule
-		ticket     = newticket
+		print("No messages. Not registered as a vote counter?", file=sys.stderr)
+		return
 	
-	with open(ticketfname, "w") as ticketfile:
-		ticketfile.write(json.dumps(newticket))
+	tally = [0 for i in range(config["schedulesize"])]
 	
+	x = 0
+	for (user, data) in messages:
+		print(data, file=sys.stderr)
+		for i in range(config["schedulesize"]):
+			x, y = data[i].split("-")
+			tally[i] += int(y)
+	
+	hextally = [x + "-" + str(timeslot) for timeslot in tally]
+	
+	print("decrypt")
 	print(votername)
-	print(schedule)
-	print(ticket)
+	print(len(messages))
+	print(",".join(hextally))
+
+def reqsync(votername, config):
+	"""Request any information that the client should know (keys and messages)."""
+	
+	print("sync")
+	print(votername)
+
+def decryptuser(encrypted, privatekey):
+	"""Decrypt all the shares of a particular user (one per timeslot)."""
+	
+	decrypted = privatekey.decrypt(base64.b64decode(encrypted))
+	return decrypted.decode("utf8").split(",")
+
+def sync(votername, config):
+	"""Process information the server says the client should know (keys and messages).
+	
+	Unlike the rest of processor, the input comes from stdin (because it can be quite
+	extensive). It should be formatted as a JSON string."""
+	
+	keysfname    = os.path.join(config["userdir"], "keys")
+	privkeyfname = os.path.join(config["userdir"], "privatekey")
+	messagefname = os.path.join(config["userdir"], "messages")
+	
+	info = json.load(sys.stdin)
+	counterkeys = info["counterkeys"]
+	
+	with open(keysfname, "w") as keysfile:
+		keysfile.write(json.dumps(counterkeys))
+	
+	if "messages" in info:
+		messages = info["messages"]
+		
+		try:
+			with open(privkeyfname, "rb") as privkeyfile:
+				privatekey = RSA.importKey(privkeyfile.read())
+		except FileNotFoundError:
+			print("Private key not found.", file=sys.stderr)
+			return
+		
+		decrypted = [(name, decryptuser(data, privatekey)) for (name, data) in messages]
+		
+		with open(messagefname, "w") as messagefile:
+			messagefile.write(json.dumps(decrypted))
 
 def displayusage():
 	"""Print the usage of this command to the command line."""
 	
 	print(("Usage:\n" +
-	       "\tpython {} vote votername schedule [configfile=config.json]\n" +
-	       "\tpython {} response votername message [configfile=config.json]\n\n" +
-	       "\t'vote'     | initiate a vote\n" +
-	       "\t'response' | process server response\n" +
-	       "\tvotername  | voter's username\n" +
-	       "\tschedule   | voter's schedule as a bitmap of availability.\n" +
-	       "\t             schedule[bit 3] is 1 if the voter can meet at timeslot 3.\n" +
-	       "\t             It must encoded as a string of zeros and ones.\n" +
-	       "\message     | content of server response\n" +
-	       "\tconfigfile | scheduler configuration file.").format(__file__), file=sys.stderr)
+	       "  python {0} vote votername schedule [configfile=config.json]\n" +
+	       "  python {0} register votername [configfile=config.json]\n" +
+	       "  python {0} decrypt votername [configfile=config.json]\n" +
+	       "  python {0} reqsync votername [configfile=config.json]\n" +
+	       "  python {0} sync votername [configfile=config.json]\n\n" +
+	       "    'vote'     | initiate a vote\n" +
+	       "    'register' | register as a vote counter\n" +
+	       "    'decrypt'  | send secret share for aggregate decryption\n" +
+	       "    'reqsync'  | get any info from the server (keys and messages)\n" +
+	       "    'sync'     | process server response to sync\n" +
+	       "    votername  | voter's username\n" +
+	       "    schedule   | voter's schedule as a bitmap of availability.\n" +
+	       "                 schedule[bit 3] is 1 if the voter can meet at timeslot 3.\n" +
+	       "                 It must encoded as an array of zeros and ones,\n" +
+	       "                 and then encrypted independently using Shamir's secret\n" +
+	       "                 sharing scheme, encoded in base64 and concatenated with\n" +
+	       "                 commas. Then for each vote counter, shares are concatenated\n" +
+	       "                 using semicolons.\n" +
+	       "    configfile | scheduler configuration file.").format(__file__), file=sys.stderr)
 
 def main():
 	"""Main client entry point."""
 	
 	# argument parsing and validation
 	
-	if len(sys.argv) < 4 or len(sys.argv) > 5:
+	if len(sys.argv) < 3 or len(sys.argv) > 5:
 		displayusage()
 		return
 	
 	mode        = sys.argv[1]
 	votername   = sys.argv[2]
-	schedule    = sys.argv[3]
-	message     = sys.argv[3]
-	configfname = sys.argv[4] if len(sys.argv) > 4 else "config.json"
+	
+	if mode == "register" or mode == "decrypt" or mode == "reqsync" or mode == "sync":
+		configfname = sys.argv[3] if len(sys.argv) > 3 else "config.json"
+	else:
+		if len(sys.argv) < 4:
+			displayusage()
+			return
+		
+		schedule    = sys.argv[3]
+		message     = sys.argv[3]
+		configfname = sys.argv[4] if len(sys.argv) > 4 else "config.json"
 	
 	if len(votername) < 1:
 		print("The voter's name cannot be empty.", file=sys.stderr)
@@ -100,6 +227,13 @@ def main():
 		print("Can't open configuration file.", file=sys.stderr)
 		displayusage()
 		return
+	
+	configuration["megaprime"] = get_large_enough_prime([configuration["maxvotes"]])
+	
+	# all paths from here on require this folder to exist
+	userdir = os.path.join("client", "private", votername)
+	configuration["userdir"] = userdir
+	os.makedirs(userdir, exist_ok=True)
 	
 	if mode == "vote":
 		if len(schedule) != configuration["schedulesize"]:
@@ -117,18 +251,24 @@ def main():
 		
 		# actual processing of the vote
 		print("sending vote as {}: {}".format(votername, schedule), file=sys.stderr)
-		process(votername, schedule, configuration)
+		vote(votername, schedule, configuration)
 		
-	elif mode == "response":
-		# actual processing of the server response
-		ticket = message
-		ticketfname = os.path.join("client", "private", votername, "ticket")
-		with open(ticketfname, "w") as ticketfile:
-			ticketfile.write(json.dumps(ticket))
+	elif mode == "register":
+		register(votername, configuration)
+		
+	elif mode == "decrypt":
+		decrypt(votername, configuration)
+		
+	elif mode == "reqsync":
+		reqsync(votername, configuration)
+		
+	elif mode == "sync":
+		sync(votername, configuration)
 		
 	else:
-		print("Unrecognize mode: {}".format(mode))
+		print("Unrecognize mode: {}".format(mode), file=sys.stderr)
 		displayusage()
+		return
 
 if __name__ == "__main__":
 	main()

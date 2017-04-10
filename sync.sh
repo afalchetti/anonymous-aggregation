@@ -26,15 +26,22 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 votername=$1
-schedule=$2
 
-./sync.sh $votername
-
-message=$(python3 client.py vote $votername $schedule)
+message=$(python3 client.py reqsync $votername)
 
 while read -r line
 do
 	echo "[Message -> Server]: '$line'"
 done <<< "${message}"
 
-echo "${message}" | xargs -d '\n' python3 server.py
+response=$(echo "${message}" | xargs -d '\n' python3 server.py)
+
+while read -r line
+do
+	echo "[Message -> Client]: '$line'"
+done <<< "${response}"
+
+if [ -n "${response}" ]
+then
+	echo "${response}" | python3 client.py sync $votername
+fi
