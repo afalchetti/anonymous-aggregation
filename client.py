@@ -52,6 +52,9 @@ def vote(votername, schedule, config):
 		print("Not enough counters.")
 		return
 	
+	noise = config["inputnoise"]
+	schedule = [avail if random.random() > noise else chr(2 * ord('0') + 1 - ord(avail)) for avail in schedule]
+	
 	shares = []
 	for i in range(config["schedulesize"]):
 		points = secret_int_to_points(ord(schedule[i]) - ord('0'),

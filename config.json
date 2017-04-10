@@ -1,4 +1,5 @@
 {
 	"schedulesize": 3,
-	"maxvotes": 21563
+	"maxvotes": 21563,
+	"inputnoise": 0.1
 }
