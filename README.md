@@ -17,12 +17,14 @@ python3 client.py votername schedule
 ```
 where the schedule is binary data (one bit per timeslot) encoded as a string of '1' and '0' characters.
 
-This script will calculate any encryption required to protect the voter's secret (for now, no encryption is applied)
-and output the appropriate communication to be sent the server.
-The server script then must be called with the appropriate arguments,
+This script will calculate any encryption required to protect the voter's secret (for now, no encryption is applied),
+generate an update ticket (which can be used to update the vote later) and output the appropriate communication to
+be sent the server.
+
+Then, the server script must be called with the appropriate arguments,
 
 ```
-python3 server.py votername schedule
+python3 server.py votername schedule ticket
 ```
 
 A third bash script, `vote.sh` (which takes the same arguments as `client.py`) pipes both processor and outputs

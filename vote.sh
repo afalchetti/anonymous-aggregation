@@ -28,11 +28,21 @@
 votername=$1
 schedule=$2
 
-message=$(python3 client.py $votername $schedule)
+message=$(python3 client.py vote $votername $schedule)
 
 while read -r line
 do
-	echo "[Message]: '$line'"
+	echo "[Message -> Server]: '$line'"
 done <<< "${message}"
 
-echo "${message}" | xargs -d '\n' python3 server.py
+response=$(echo "${message}" | xargs -d '\n' python3 server.py)
+
+while read -r line
+do
+	echo "[Message -> Client]: '$line'"
+done <<< "${response}"
+
+if [ -n "${response}" ]
+then
+	echo "${response}" | xargs -d '\n' python3 client.py response
+fi

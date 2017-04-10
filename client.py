@@ -27,22 +27,50 @@
 
 import sys
 import os
+import random
 import json
+import binascii
 
 def process(votername, schedule, config):
 	"""Compute and print an appropriate message for the server from the user details."""
 	
+	userdir     = os.path.join("client", "private", votername)
+	ticketfname = os.path.join(userdir, "ticket")
+	
+	os.makedirs(userdir, exist_ok=True)
+	
+	# ticket format: random 32 bits prefix + last schedule (to be able to validate diff)
+	try:
+		with open(ticketfname, "r") as ticketfile:
+			ticket = json.loads(ticketfile.read())
+		
+		newticket = ticket.split("-")[0] + "-" + schedule
+		
+	except FileNotFoundError:
+		newticket  = binascii.b2a_base64(os.urandom(32)).decode().strip('\n=')
+		newticket += "-" + schedule
+		ticket     = newticket
+	
+	with open(ticketfname, "w") as ticketfile:
+		ticketfile.write(json.dumps(newticket))
+	
 	print(votername)
 	print(schedule)
+	print(ticket)
 
 def displayusage():
 	"""Print the usage of this command to the command line."""
 	
-	print(("usage: python {} votername schedule [configfile=config.json]\n\n" +
+	print(("Usage:\n" +
+	       "\tpython {} vote votername schedule [configfile=config.json]\n" +
+	       "\tpython {} response votername message [configfile=config.json]\n\n" +
+	       "\t'vote'     | initiate a vote\n" +
+	       "\t'response' | process server response\n" +
 	       "\tvotername  | voter's username\n" +
 	       "\tschedule   | voter's schedule as a bitmap of availability.\n" +
 	       "\t             schedule[bit 3] is 1 if the voter can meet at timeslot 3.\n" +
 	       "\t             It must encoded as a string of zeros and ones.\n" +
+	       "\message     | content of server response\n" +
 	       "\tconfigfile | scheduler configuration file.").format(__file__), file=sys.stderr)
 
 def main():
@@ -50,12 +78,15 @@ def main():
 	
 	# argument parsing and validation
 	
-	if len(sys.argv) < 3 or len(sys.argv) > 4:
+	if len(sys.argv) < 4 or len(sys.argv) > 5:
 		displayusage()
+		return
 	
-	votername   = sys.argv[1]
-	schedule    = sys.argv[2]
-	configfname = sys.argv[3] if len(sys.argv) > 3 else "config.json"
+	mode        = sys.argv[1]
+	votername   = sys.argv[2]
+	schedule    = sys.argv[3]
+	message     = sys.argv[3]
+	configfname = sys.argv[4] if len(sys.argv) > 4 else "config.json"
 	
 	if len(votername) < 1:
 		print("The voter's name cannot be empty.", file=sys.stderr)
@@ -70,22 +101,34 @@ def main():
 		displayusage()
 		return
 	
-	if len(schedule) != configuration["schedulesize"]:
-		print("The schedule is the wrong size,\n" +
-		      "schedule len == {} != {} == config len.".format(len(schedule),
-		                                                       configuration["schedulesize"]),
-		      file=sys.stderr)
+	if mode == "vote":
+		if len(schedule) != configuration["schedulesize"]:
+			print("The schedule is the wrong size,\n" +
+			      "schedule len == {} != {} == config len.".format(len(schedule),
+			                                                       configuration["schedulesize"]),
+			      file=sys.stderr)
+			displayusage()
+			return
+		
+		if any([x != '0' and x != '1' for x in schedule]) > 0:
+			print("Couldn't decode schedule.", file=sys.stderr)
+			displayusage()
+			return
+		
+		# actual processing of the vote
+		print("sending vote as {}: {}".format(votername, schedule), file=sys.stderr)
+		process(votername, schedule, configuration)
+		
+	elif mode == "response":
+		# actual processing of the server response
+		ticket = message
+		ticketfname = os.path.join("client", "private", votername, "ticket")
+		with open(ticketfname, "w") as ticketfile:
+			ticketfile.write(json.dumps(ticket))
+		
+	else:
+		print("Unrecognize mode: {}".format(mode))
 		displayusage()
-		return
-	
-	if any([x != '0' and x != '1' for x in schedule]) > 0:
-		print("Couldn't decode schedule.", file=sys.stderr)
-		displayusage()
-		return
-	
-	# actual processing of the vote
-	print("sending vote as {}: {}".format(votername, schedule), file=sys.stderr)
-	process(votername, schedule, configuration)
 
 if __name__ == "__main__":
 	main()

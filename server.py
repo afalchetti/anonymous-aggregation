@@ -28,8 +28,44 @@
 import sys
 import os
 import json
+import binascii
+import hashlib
 
-def process(votername, schedule, config):
+def hashdigest(message, salt):
+	""" Compute the hexadecimal digest of a message using the SHA256 algorithm."""
+	
+	processor = hashlib.sha256()
+	
+	processor.update(salt.encode("utf8"))
+	processor.update(message.encode("utf8"))
+	
+	return processor.hexdigest()
+
+def parseticket(ticket, salt, config):
+	"""Parse and validate an update ticket."""
+	
+	components = ticket.split("-")
+	
+	if len(components) != 2:
+		raise FormatError("Tickets must be of the form 'randomprefix-oldschedule'.")
+	
+	prefix      = components[0]
+	oldschedule = components[1]
+	
+	if len(oldschedule) != config["schedulesize"]:
+		raise FormatError("The 'schedule' section of the ticket " +
+		                  "must have length {}.".format(config["schedulesize"]))
+		
+	
+	if any([x != '0' and x != '1' for x in oldschedule]):
+		raise FormatError("The 'schedule' section of the ticket " +
+		                  "must only contain 0 and 1 characters.")
+	
+	tickethash = hashdigest(ticket, salt)
+	
+	return prefix, oldschedule, tickethash
+
+def process(votername, schedule, ticket, config):
 	"""Add a user vote to the aggregate."""
 	
 	statefname = os.path.join("server", "private", "state")
@@ -51,22 +87,55 @@ def process(votername, schedule, config):
 	
 	# first run
 	if not "votes" in state:
-		state["votes"] = []
+		state["votes"] = {}
 	
-	# avoiding duplicates by removing (and warning) when the user has already voted
-	filtered = [(name, vote) for (name, vote) in state["votes"] if name != votername]
+	if not "tally" in state:
+		state["tally"] = [0 for i in range(config["schedulesize"])]
 	
-	if len(filtered) != len(state["votes"]):
-		print("voter {} already voted, chaging their vote".format(votername), file=sys.stderr)
+	# ticket hash computation
+	if votername in state["votes"]:
+		salt = state["votes"][votername]["salt"]
+	else:
+		salt = binascii.b2a_base64(os.urandom(32)).decode().strip('\n=')
 	
-	state["votes"] = filtered
-	state["votes"].append((votername, schedule))
+	try:
+		prefix, oldschedule, tickethash = parseticket(ticket, salt, config)
+	except FormatError as e:
+		print("Incorrect ticket format.", file=sys.stderr)
+		print(e, file=sys.stderr)
+		return
 	
-	# compute tally
-	state["tally"] = [0 for i in range(config["schedulesize"])]
-	for (name, vote) in state["votes"]:
+	# actual voting
+	if not votername in state["votes"]:
+		if oldschedule != schedule:
+			print("First time voter: invalid ticket, uses different schedule", file=sys.stderr)
+			return
+		
+		state["votes"][votername] = {
+			"hash": tickethash,
+			"salt": salt
+		}
+		
+		# update tally
 		for i in range(config["schedulesize"]):
-			state["tally"][i] += ord(vote[i]) - ord('0')
+			state["tally"][i] += ord(schedule[i]) - ord('0')
+		
+	# avoiding duplicates by removing old vote (and warning) when the user has already voted
+	else:
+		print("voter {} already voted, chaging their vote".format(votername), file=sys.stderr)
+		
+		if tickethash != state["votes"][votername]["hash"]:
+			print("Incorrect update ticket. Operation denied.", file=sys.stderr)
+			return
+		
+		newhash = hashdigest(prefix + "-" + schedule, salt)
+		diff    = [ord(schedule[i]) - ord(oldschedule[i]) for i in range(config["schedulesize"])]
+		
+		state["votes"][votername]["hash"] = newhash
+		
+		# update tally with diff
+		for i in range(config["schedulesize"]):
+			state["tally"][i] += diff[i]
 	
 	# persistent state dumping ---------
 	with open(statefname, "w") as statefile:
@@ -79,11 +148,12 @@ def process(votername, schedule, config):
 def displayusage():
 	"""Print the usage of this command to the command line."""
 	
-	print(("usage: python {} votername schedule [configfile=config.json]\n\n" +
+	print(("usage: python {} votername schedule ticket [configfile=config.json]\n\n" +
 	       "\tvotername  | voter's username\n" +
 	       "\tschedule   | voter's schedule as a bitmap of availability,\n" +
 	       "\t             i.e. schedule[bit 3] is 1 if the voter can meet\n" +
 	       "\t             at timeslot 3. It must encoded in base64.\n" +
+	       "\tticket     | update ticket (secret key to prove vote update is valid)\n" +
 	       "\tconfigfile | scheduler configuration file.").format(__file__), file=sys.stderr)
 
 def main():
@@ -91,12 +161,14 @@ def main():
 	
 	# argument parsing and validation
 	
-	if len(sys.argv) < 3 or len(sys.argv) > 4:
+	if len(sys.argv) < 4 or len(sys.argv) > 5:
 		displayusage()
+		return
 	
 	votername   = sys.argv[1]
 	schedule    = sys.argv[2]
-	configfname = sys.argv[3] if len(sys.argv) > 3 else "config.json"
+	ticket      = sys.argv[3]
+	configfname = sys.argv[4] if len(sys.argv) > 4 else "config.json"
 	
 	if len(votername) < 1:
 		print("The voter's name cannot be empty.", file=sys.stderr)
@@ -126,7 +198,7 @@ def main():
 	
 	# actual server processing
 	print("processing vote from {}: {}".format(votername, schedule), file=sys.stderr)
-	state = process(votername, schedule, configuration)
+	state = process(votername, schedule, ticket, configuration)
 	print("tally: {}".format(state["tally"]), file=sys.stderr)
 
 if __name__ == "__main__":
