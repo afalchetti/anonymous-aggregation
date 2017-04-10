@@ -3,7 +3,7 @@
 A simple way to agree on the date for a meeting, considering everyone's schedule and making
 sure to leak the minimum amount of information of each participant as possible.
 
-Copyright (C) 2017 Angelo Falchetti
+Copyright (C) 2017 Angelo Falchetti.
 All rights reserved.
 
 ## Usage

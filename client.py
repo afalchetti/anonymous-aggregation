@@ -26,14 +26,19 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import sys
+import os
 import json
 
 def process(votername, schedule, config):
+	"""Compute and print an appropriate message for the server from the user details."""
+	
 	print(votername)
 	print(schedule)
 
 def displayusage():
-	print(("usage: python {} votername schedule [configfile=configuration.json]\n\n" +
+	"""Print the usage of this command to the command line."""
+	
+	print(("usage: python {} votername schedule [configfile=config.json]\n\n" +
 	       "\tvotername  | voter's username\n" +
 	       "\tschedule   | voter's schedule as a bitmap of availability.\n" +
 	       "\t             schedule[bit 3] is 1 if the voter can meet at timeslot 3.\n" +
@@ -41,12 +46,16 @@ def displayusage():
 	       "\tconfigfile | scheduler configuration file.").format(__file__), file=sys.stderr)
 
 def main():
+	"""Main client entry point."""
+	
+	# argument parsing and validation
+	
 	if len(sys.argv) < 3 or len(sys.argv) > 4:
 		displayusage()
 	
 	votername   = sys.argv[1]
 	schedule    = sys.argv[2]
-	configfname = sys.argv[3] if len(sys.argv) > 3 else "configuration.json"
+	configfname = sys.argv[3] if len(sys.argv) > 3 else "config.json"
 	
 	if len(votername) < 1:
 		print("The voter's name cannot be empty.", file=sys.stderr)
@@ -74,6 +83,7 @@ def main():
 		displayusage()
 		return
 	
+	# actual processing of the vote
 	print("sending vote as {}: {}".format(votername, schedule), file=sys.stderr)
 	process(votername, schedule, configuration)
 

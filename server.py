@@ -26,13 +26,20 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import sys
+import os
 import json
 
 def process(votername, schedule, config):
-	with open("server/private/state", "a") as statefile:
+	"""Add a user vote to the aggregate."""
+	
+	statefname = os.path.join("server", "private", "state")
+	
+	# persistent state loading ---------
+	# create file if it doesn't exist
+	with open(statefname, "a") as statefile:
 		pass
 	
-	with open("server/private/state", "r") as statefile:
+	with open(statefname, "r") as statefile:
 		data = statefile.read()
 		
 		if len(data) == 0:
@@ -40,9 +47,13 @@ def process(votername, schedule, config):
 		
 		state = json.loads(data)
 	
+	# ----------------------------------
+	
+	# first run
 	if not "votes" in state:
 		state["votes"] = []
 	
+	# avoiding duplicates by removing (and warning) when the user has already voted
 	filtered = [(name, vote) for (name, vote) in state["votes"] if name != votername]
 	
 	if len(filtered) != len(state["votes"]):
@@ -51,19 +62,24 @@ def process(votername, schedule, config):
 	state["votes"] = filtered
 	state["votes"].append((votername, schedule))
 	
+	# compute tally
 	state["tally"] = [0 for i in range(config["schedulesize"])]
-	
 	for (name, vote) in state["votes"]:
 		for i in range(config["schedulesize"]):
 			state["tally"][i] += ord(vote[i]) - ord('0')
 	
-	with open("server/private/state", "w") as statefile:
+	# persistent state dumping ---------
+	with open(statefname, "w") as statefile:
 		statefile.write(json.dumps(state))
+	
+	# ----------------------------------
 	
 	return state
 
 def displayusage():
-	print(("usage: python {} votername schedule [configfile=configuration.json]\n\n" +
+	"""Print the usage of this command to the command line."""
+	
+	print(("usage: python {} votername schedule [configfile=config.json]\n\n" +
 	       "\tvotername  | voter's username\n" +
 	       "\tschedule   | voter's schedule as a bitmap of availability,\n" +
 	       "\t             i.e. schedule[bit 3] is 1 if the voter can meet\n" +
@@ -71,12 +87,16 @@ def displayusage():
 	       "\tconfigfile | scheduler configuration file.").format(__file__), file=sys.stderr)
 
 def main():
+	"""Main server entry point."""
+	
+	# argument parsing and validation
+	
 	if len(sys.argv) < 3 or len(sys.argv) > 4:
 		displayusage()
 	
 	votername   = sys.argv[1]
 	schedule    = sys.argv[2]
-	configfname = sys.argv[3] if len(sys.argv) > 3 else "configuration.json"
+	configfname = sys.argv[3] if len(sys.argv) > 3 else "config.json"
 	
 	if len(votername) < 1:
 		print("The voter's name cannot be empty.", file=sys.stderr)
@@ -104,6 +124,7 @@ def main():
 		displayusage()
 		return
 	
+	# actual server processing
 	print("processing vote from {}: {}".format(votername, schedule), file=sys.stderr)
 	state = process(votername, schedule, configuration)
 	print("tally: {}".format(state["tally"]), file=sys.stderr)
