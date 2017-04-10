@@ -40,10 +40,16 @@ def process(votername, schedule, config):
 		
 		state = json.loads(data)
 	
-	if "votes" in state:
-		state["votes"].append((votername, schedule))
-	else:
-		state["votes"] = [(votername, schedule)]
+	if not "votes" in state:
+		state["votes"] = []
+	
+	filtered = [(name, vote) for (name, vote) in state["votes"] if name != votername]
+	
+	if len(filtered) != len(state["votes"]):
+		print("voter {} already voted, chaging their vote".format(votername), file=sys.stderr)
+	
+	state["votes"] = filtered
+	state["votes"].append((votername, schedule))
 	
 	state["tally"] = [0 for i in range(config["schedulesize"])]
 	
