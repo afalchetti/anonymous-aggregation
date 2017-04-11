@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# client.py
 # 
 # Copyright (C) 2017 Angelo Falchetti
 # All rights reserved.
@@ -61,7 +62,7 @@ def vote(votername, schedule, config):
 		                              ncounters, ncounters, config["megaprime"])
 		shares.append([str(point[0]) + "-" + str(point[1]) for point in points])
 	
-	# transpose, remove secretsharing prefixes, serialize to string and encrypt
+	# transpose, serialize to string and encrypt
 	sharegroups = []
 	for i, counter in enumerate(counterkeys):
 		name, key  = counter
@@ -114,7 +115,7 @@ def decrypt(votername, config):
 	
 	tally = [0 for i in range(config["schedulesize"])]
 	
-	x = 0
+	x = None
 	for (user, data) in messages:
 		print(data, file=sys.stderr)
 		for i in range(config["schedulesize"]):

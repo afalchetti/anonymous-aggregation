@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# server.py
 # 
 # Copyright (C) 2017 Angelo Falchetti
 # All rights reserved.
@@ -74,6 +75,7 @@ def register(votername, publickey, config):
 	state["counterkeys"].append((votername, publickey))
 
 def parsepoint(point):
+	"""Parse and validate string point representation."""
 	comps = point.split("-")
 	return (int(comps[0]), int(comps[1]))
 

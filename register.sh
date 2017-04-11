@@ -1,5 +1,5 @@
 #!/bin/bash
-# vote.sh
+# register.sh
 # 
 # Copyright (C) 2017 Angelo Falchetti
 # All rights reserved.
